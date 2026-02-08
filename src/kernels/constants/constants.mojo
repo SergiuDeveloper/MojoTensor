@@ -1,0 +1,1 @@
+comptime MAX_GRID_SIZE = 65535
