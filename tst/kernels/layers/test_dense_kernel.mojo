@@ -9,7 +9,7 @@ from testing import TestSuite, assert_almost_equal
 from src.kernels.layers import dense_forward, dense_backward
 from src.kernels.constants import MAX_GRID_SIZE
 
-def test_dense_forward():
+fn test_dense_forward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64
     comptime OUTPUT_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
@@ -117,7 +117,7 @@ def test_dense_forward():
                     idx = batch * OUTPUT_DIM + row
                     assert_almost_equal(output_host[idx], expected[idx], rtol=1e-10)
 
-def test_dense_backward():
+fn test_dense_backward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64
     comptime X_GRAD_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
@@ -158,12 +158,12 @@ def test_dense_backward():
         grad_output = ctx.enqueue_create_buffer[DTYPE](BATCH_SIZE * OUTPUT_DIM)
         grad_output.enqueue_fill(0)
         
-        expected_w = ctx.enqueue_create_host_buffer[DTYPE](OUTPUT_DIM * INPUT_DIM)
-        expected_w.enqueue_fill(0)
-        expected_b = ctx.enqueue_create_host_buffer[DTYPE](OUTPUT_DIM)
-        expected_b.enqueue_fill(0)
-        expected_x = ctx.enqueue_create_host_buffer[DTYPE](BATCH_SIZE * INPUT_DIM)
-        expected_x.enqueue_fill(0)
+        expected_w_gradient = ctx.enqueue_create_host_buffer[DTYPE](OUTPUT_DIM * INPUT_DIM)
+        expected_w_gradient.enqueue_fill(0)
+        expected_b_gradient = ctx.enqueue_create_host_buffer[DTYPE](OUTPUT_DIM)
+        expected_b_gradient.enqueue_fill(0)
+        expected_x_gradient = ctx.enqueue_create_host_buffer[DTYPE](BATCH_SIZE * INPUT_DIM)
+        expected_x_gradient.enqueue_fill(0)
         
         with x.map_to_host() as x_host, w.map_to_host() as w_host, grad_output.map_to_host() as grad_output_host:
             for batch in range(BATCH_SIZE):
@@ -183,20 +183,20 @@ def test_dense_backward():
                     acc: Float64 = 0.0
                     for batch in range(BATCH_SIZE):
                         acc += grad_output_host[batch * OUTPUT_DIM + i] * x_host[batch * INPUT_DIM + k]
-                    expected_w[i * INPUT_DIM + k] = acc
+                    expected_w_gradient[i * INPUT_DIM + k] = acc
             
             for i in range(OUTPUT_DIM):
                 acc: Float64 = 0.0
                 for batch in range(BATCH_SIZE):
                     acc += grad_output_host[batch * OUTPUT_DIM + i]
-                expected_b[i] = acc
+                expected_b_gradient[i] = acc
             
             for batch in range(BATCH_SIZE):
                 for k in range(INPUT_DIM):
                     acc: Float64 = 0.0
                     for i in range(OUTPUT_DIM):
                         acc += w_host[i * INPUT_DIM + k] * grad_output_host[batch * OUTPUT_DIM + i]
-                    expected_x[batch * INPUT_DIM + k] = acc
+                    expected_x_gradient[batch * INPUT_DIM + k] = acc
 
         w_gradient_tensor = LayoutTensor[DTYPE, W_GRAD_LAYOUT, MutAnyOrigin](
             w_gradient,
@@ -270,18 +270,18 @@ def test_dense_backward():
             for row in range(OUTPUT_DIM):
                 for col in range(INPUT_DIM):
                     idx = row * INPUT_DIM + col
-                    assert_almost_equal(w_gradient_host[idx], expected_w[idx], rtol=1e-10)
+                    assert_almost_equal(w_gradient_host[idx], expected_w_gradient[idx], rtol=1e-10)
         
         with b_gradient.map_to_host() as b_gradient_host:
             for i in range(OUTPUT_DIM):
-                assert_almost_equal(b_gradient_host[i], expected_b[i], rtol=1e-10)
+                assert_almost_equal(b_gradient_host[i], expected_b_gradient[i], rtol=1e-10)
         
         with x_gradient.map_to_host() as x_gradient_host:
             for batch in range(BATCH_SIZE):
                 for col in range(INPUT_DIM):
                     idx = batch * INPUT_DIM + col
-                    assert_almost_equal(x_gradient_host[idx], expected_x[idx], rtol=1e-10)
+                    assert_almost_equal(x_gradient_host[idx], expected_x_gradient[idx], rtol=1e-10)
 
-def main():
+fn main() raises:
     seed(42)
     TestSuite.discover_tests[__functions_in_module()]().run()

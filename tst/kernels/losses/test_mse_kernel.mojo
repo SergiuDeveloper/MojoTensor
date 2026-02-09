@@ -9,7 +9,7 @@ from testing import TestSuite, assert_almost_equal
 from src.kernels.losses import mse_forward, mse_backward
 from src.kernels.constants import MAX_GRID_SIZE
 
-def test_mse_forward():
+fn test_mse_forward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64
     comptime OUTPUT_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE, UNKNOWN_VALUE)
@@ -23,7 +23,7 @@ def test_mse_forward():
     blocks_per_batch = ((SIZE2 + TPB - 1) // TPB) * ((SIZE1 + TPB - 1) // TPB)
     total_blocks = BATCH_SIZE * blocks_per_batch
     
-    grid_x = min(total_blocks, 65535)
+    grid_x = min(total_blocks, MAX_GRID_SIZE)
     grid_y = (total_blocks + grid_x - 1) // grid_x
     grid_z = 1
     
@@ -97,7 +97,7 @@ def test_mse_forward():
                         assert_almost_equal(output_host[idx], expected[idx], rtol=1e-10)
 
 
-def test_mse_backward():
+fn test_mse_backward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64
     comptime OUTPUT_INPUT_GRADIENT_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE, UNKNOWN_VALUE)
@@ -112,7 +112,7 @@ def test_mse_backward():
     blocks_per_batch = ((SIZE2 + TPB - 1) // TPB) * ((SIZE1 + TPB - 1) // TPB)
     total_blocks = BATCH_SIZE * blocks_per_batch
     
-    grid_x = min(total_blocks, 65535)
+    grid_x = min(total_blocks, MAX_GRID_SIZE)
     grid_y = (total_blocks + grid_x - 1) // grid_x
     grid_z = 1
     
@@ -196,6 +196,6 @@ def test_mse_backward():
                         assert_almost_equal(output_input_gradient_host[idx], expected[idx], rtol=1e-10)
 
 
-def main():
+fn main() raises:
     seed(42)
     TestSuite.discover_tests[__functions_in_module()]().run()

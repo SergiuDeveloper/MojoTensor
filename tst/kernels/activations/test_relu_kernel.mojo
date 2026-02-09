@@ -9,7 +9,7 @@ from testing import TestSuite, assert_almost_equal
 from src.kernels.activations import relu_forward, relu_backward
 from src.kernels.constants import MAX_GRID_SIZE
 
-def test_relu_forward():
+fn test_relu_forward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64
     comptime OUTPUT_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE, UNKNOWN_VALUE)
@@ -84,7 +84,7 @@ def test_relu_forward():
                         assert_almost_equal(output_host[idx], expected[idx], rtol=1e-10)
 
 
-def test_relu_backward():
+fn test_relu_backward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64
     comptime X_GRAD_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE, UNKNOWN_VALUE)
@@ -170,6 +170,6 @@ def test_relu_backward():
                         idx = batch * SIZE1 * SIZE2 + row * SIZE2 + col
                         assert_almost_equal(x_gradient_host[idx], expected[idx], rtol=1e-10)
 
-def main():
+fn main() raises:
     seed(42)
     TestSuite.discover_tests[__functions_in_module()]().run()
