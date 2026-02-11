@@ -1,4 +1,4 @@
-from random import random_float64, seed
+from random import random_float64
 from gpu.host import DeviceContext
 from layout import Layout, LayoutTensor
 from layout.runtime_layout import RuntimeLayout
@@ -197,5 +197,4 @@ fn test_mse_backward() raises:
 
 
 fn main() raises:
-    seed(42)
     TestSuite.discover_tests[__functions_in_module()]().run()

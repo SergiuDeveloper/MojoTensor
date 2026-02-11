@@ -3,7 +3,7 @@ from layout import Layout, LayoutTensor
 from layout.runtime_layout import RuntimeLayout
 from layout.runtime_tuple import RuntimeTuple
 from layout.int_tuple import UNKNOWN_VALUE
-from random import seed, random_float64
+from random import random_float64
 from testing import TestSuite, assert_almost_equal
 
 from src.layers import Dense
@@ -15,7 +15,7 @@ fn test_dense_forward() raises:
     comptime DTYPE = DType.float64
     comptime X_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
 
-    dense = Dense[DTYPE](INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer = Dense[DTYPE](INPUT_NEURONS, OUTPUT_NEURONS)
 
     with DeviceContext() as ctx:
         x = ctx.enqueue_create_buffer[DTYPE](BATCH_SIZE * INPUT_NEURONS)
@@ -28,8 +28,8 @@ fn test_dense_forward() raises:
                 for col in range(INPUT_NEURONS):
                     x_host[batch * INPUT_NEURONS + col] = random_float64()
 
-            w_ptr = dense.w_cpu.unsafe_ptr()
-            b_ptr = dense.b_cpu.unsafe_ptr()
+            w_ptr = dense_layer.w_cpu.unsafe_ptr()
+            b_ptr = dense_layer.b_cpu.unsafe_ptr()
             for batch in range(BATCH_SIZE):
                 for i in range(OUTPUT_NEURONS):
                     acc: Float64 = b_ptr[i].cast[DType.float64]()
@@ -47,8 +47,8 @@ fn test_dense_forward() raises:
             )
         )
 
-        dense.allocate_kernel_memory(ctx, BATCH_SIZE, False)
-        output_tensor, output = dense.forward(x_tensor)
+        dense_layer.allocate_kernel_memory(ctx, BATCH_SIZE, False)
+        output_tensor, output = dense_layer.forward(x_tensor)
         ctx.synchronize()
 
         with output.map_to_host() as output_host:
@@ -65,7 +65,7 @@ fn test_dense_backward() raises:
     comptime X_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
     comptime GRAD_OUTPUT_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
 
-    dense = Dense[DTYPE](INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer = Dense[DTYPE](INPUT_NEURONS, OUTPUT_NEURONS)
 
     with DeviceContext() as ctx:
         x = ctx.enqueue_create_buffer[DTYPE](BATCH_SIZE * INPUT_NEURONS)
@@ -89,7 +89,7 @@ fn test_dense_backward() raises:
                 for row in range(OUTPUT_NEURONS):
                     grad_output_host[batch * OUTPUT_NEURONS + row] = random_float64()
 
-            w_ptr = dense.w_cpu.unsafe_ptr()
+            w_ptr = dense_layer.w_cpu.unsafe_ptr()
 
             for i in range(OUTPUT_NEURONS):
                 for k in range(INPUT_NEURONS):
@@ -126,8 +126,8 @@ fn test_dense_backward() raises:
             )
         )
 
-        dense.allocate_kernel_memory(ctx, BATCH_SIZE, True)
-        x_gradient_tensor, x_gradient, w_gradient_tensor, w_gradient, b_gradient_tensor, b_gradient = dense.backward(x_tensor, grad_output_tensor)
+        dense_layer.allocate_kernel_memory(ctx, BATCH_SIZE, True)
+        x_gradient_tensor, x_gradient, w_gradient_tensor, w_gradient, b_gradient_tensor, b_gradient = dense_layer.backward(x_tensor, grad_output_tensor)
         ctx.synchronize()
 
         with w_gradient.map_to_host() as w_gradient_host:
@@ -147,5 +147,4 @@ fn test_dense_backward() raises:
                     assert_almost_equal(x_gradient_host[idx], expected_x_gradient[idx], rtol=1e-10)
 
 fn main() raises:
-    seed(42)
     TestSuite.discover_tests[__functions_in_module()]().run()
