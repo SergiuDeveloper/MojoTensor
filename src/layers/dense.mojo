@@ -3,6 +3,7 @@ from layout.runtime_layout import RuntimeLayout
 from layout.runtime_tuple import RuntimeTuple
 from layout.int_tuple import UNKNOWN_VALUE
 from gpu.host import DeviceContext, DeviceBuffer
+from sys import simd_width_of
 from random import rand
 
 from src.computational_graph import ComputationalGraph
@@ -272,3 +273,58 @@ struct Dense[dtype: DType]:
             (self.x_gradient_tensor.value(), self.x_gradient.value()),
             [self.w_gradient.value(), self.b_gradient.value()]
         )
+
+    fn update_weights(mut self, gradients_data: List[List[Float64]]) raises -> None:
+        if not self.training:
+            raise Error('Cannot update weights if training is disabled')
+
+        # TO-DO: TBD whether a GPU kernel would be quicker than SIMD for this
+        comptime simd_width = simd_width_of[Self.dtype]()
+
+        with self.w_cpu.map_to_host() as w_host:
+            num_w_elements = len(gradients_data[0])
+            simd_end_w = (num_w_elements // simd_width) * simd_width
+            grad_w_ptr = gradients_data[0].unsafe_ptr()
+            w_ptr = w_host.unsafe_ptr()
+
+            for j in range(0, simd_end_w, simd_width):
+                w_vec = w_ptr.load[width=simd_width](j)
+                grad_vec = grad_w_ptr.load[width=simd_width](j).cast[Self.dtype]()
+                w_ptr.store[width=simd_width](j, w_vec - grad_vec)
+
+            for j in range(simd_end_w, num_w_elements):
+                w_host[j] -= gradients_data[0][j].cast[Self.dtype]()
+
+        with self.b_cpu.map_to_host() as b_host:
+            num_b_elements = len(gradients_data[1])
+            simd_end_b = (num_b_elements // simd_width) * simd_width
+            grad_b_ptr = gradients_data[1].unsafe_ptr()
+            b_ptr = b_host.unsafe_ptr()
+
+            for j in range(0, simd_end_b, simd_width):
+                b_vec = b_ptr.load[width=simd_width](j)
+                grad_vec = grad_b_ptr.load[width=simd_width](j).cast[Self.dtype]()
+                b_ptr.store[width=simd_width](j, b_vec - grad_vec)
+
+            for j in range(simd_end_b, num_b_elements):
+                b_host[j] -= gradients_data[1][j].cast[Self.dtype]()
+        
+        if self.w is not None:
+            self.w.value().enqueue_copy_from(self.w_cpu)
+            self.w_tensor = LayoutTensor[Self.dtype, Self.W_LAYOUT, ImmutAnyOrigin](
+                self.w.value(),
+                RuntimeLayout[Self.W_LAYOUT](
+                    RuntimeTuple[Self.W_LAYOUT.shape](self.output_neurons, self.input_neurons),
+                    RuntimeTuple[Self.W_LAYOUT.stride](self.input_neurons, 1)
+                )
+            )
+        
+        if self.b is not None:
+            self.b.value().enqueue_copy_from(self.b_cpu)
+            self.b_tensor = LayoutTensor[Self.dtype, Self.B_LAYOUT, ImmutAnyOrigin](
+                self.b.value(),
+                RuntimeLayout[Self.B_LAYOUT](
+                    RuntimeTuple[Self.B_LAYOUT.shape](self.output_neurons),
+                    RuntimeTuple[Self.B_LAYOUT.stride](1)
+                )
+            )

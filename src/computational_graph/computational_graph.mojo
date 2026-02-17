@@ -4,14 +4,17 @@ from layout.int_tuple import UNKNOWN_VALUE
 from sys import simd_width_of
 
 from src.layers import Layer, LayerFuncTypeConstants
+from src.optimizers import Optimizer
 
 struct ComputationalGraph[dtype: DType](ImplicitlyCopyable):
+    var optimizer: UnsafePointer[Optimizer[Self.dtype], MutAnyOrigin]
     var backward_operation_inputs: List[Tuple[UnsafePointer[Layer[Self.dtype], MutAnyOrigin], Optional[UnsafePointer[Layer[Self.dtype], MutAnyOrigin]], LayerFuncTypeConstants[Self.dtype].LayerInputType]]
     var backward_operation_grad_outputs: Dict[String, List[LayerFuncTypeConstants[Self.dtype].LayerGradOutputType]]
     var gradients: Dict[String, List[List[Float64]]]
     var layer_keys: Dict[String, UnsafePointer[Layer[Self.dtype], MutAnyOrigin]]
 
-    fn __init__(out self):
+    fn __init__(out self, optimizer: UnsafePointer[Optimizer[Self.dtype], MutAnyOrigin]):
+        self.optimizer = optimizer
         self.backward_operation_inputs = []
         self.backward_operation_grad_outputs = {}
         self.gradients = {}
@@ -47,6 +50,8 @@ struct ComputationalGraph[dtype: DType](ImplicitlyCopyable):
         self.layer_keys = {}
         for entry in existing.layer_keys.items():
             self.layer_keys[entry.key] = entry.value
+
+        self.optimizer = existing.optimizer
 
     fn add_backward_operation_inputs(
         mut self,
@@ -115,11 +120,10 @@ struct ComputationalGraph[dtype: DType](ImplicitlyCopyable):
 
             self.add_backward_operation_grad_outputs(previous_layer, x_gradient_data[0].copy())
 
-    fn update_weights(mut self) -> None:
-        for layer_key, gradients_data in self.gradients.items():
-            layer = self.layer_keys[layer_key]
-            # TO-DO: Update based on optimizer rules
-
+    fn update_weights(mut self) raises -> None:
+        for gradient_item in self.gradients.items():
+            layer = self.layer_keys[gradient_item.key]
+            self.optimizer[].update_weights(layer, gradient_item.value)
         self.gradients = {}
         self.layer_keys = {}
 

@@ -1,3 +1,3 @@
-from src.layers.dense import Dense
+from .dense import Dense
 
 comptime Layer = Dense
