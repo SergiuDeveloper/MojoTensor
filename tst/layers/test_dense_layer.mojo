@@ -7,6 +7,7 @@ from random import random_float64
 from testing import TestSuite, assert_almost_equal
 
 from src.layers import Dense
+from src.computational_graph import ComputationalGraph
 
 fn test_dense_forward() raises:
     comptime BATCH_SIZE = 32
@@ -15,7 +16,9 @@ fn test_dense_forward() raises:
     comptime DTYPE = DType.float64
     comptime X_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
 
-    dense_layer = Dense[DTYPE](INPUT_NEURONS, OUTPUT_NEURONS)
+    computational_graph = ComputationalGraph[DTYPE]()
+    computational_graph_ptr = UnsafePointer(to=computational_graph)
+    dense_layer = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
 
     with DeviceContext() as ctx:
         x = ctx.enqueue_create_buffer[DTYPE](BATCH_SIZE * INPUT_NEURONS)
@@ -47,8 +50,8 @@ fn test_dense_forward() raises:
             )
         )
 
-        dense_layer.allocate_kernel_memory(ctx, BATCH_SIZE, False)
-        output_tensor, output = dense_layer.forward(x_tensor)
+        dense_layer.allocate_kernel_memory(ctx, BATCH_SIZE)
+        output_tensor, output = dense_layer.forward(None, x_tensor)
         ctx.synchronize()
 
         with output.map_to_host() as output_host:
@@ -65,7 +68,10 @@ fn test_dense_backward() raises:
     comptime X_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
     comptime GRAD_OUTPUT_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
 
-    dense_layer = Dense[DTYPE](INPUT_NEURONS, OUTPUT_NEURONS)
+    computational_graph = ComputationalGraph[DTYPE]()
+    computational_graph_ptr = UnsafePointer(to=computational_graph)
+    dense_layer = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer.set_training(True)
 
     with DeviceContext() as ctx:
         x = ctx.enqueue_create_buffer[DTYPE](BATCH_SIZE * INPUT_NEURONS)
@@ -126,8 +132,11 @@ fn test_dense_backward() raises:
             )
         )
 
-        dense_layer.allocate_kernel_memory(ctx, BATCH_SIZE, True)
-        x_gradient_tensor, x_gradient, w_gradient_tensor, w_gradient, b_gradient_tensor, b_gradient = dense_layer.backward(x_tensor, grad_output_tensor)
+        dense_layer.allocate_kernel_memory(ctx, BATCH_SIZE)
+        gradients_data = dense_layer.backward(None, x_tensor, grad_output_tensor)
+        x_gradient = gradients_data[0][1]
+        w_gradient = gradients_data[1][0]
+        b_gradient = gradients_data[1][1]
         ctx.synchronize()
 
         with w_gradient.map_to_host() as w_gradient_host:

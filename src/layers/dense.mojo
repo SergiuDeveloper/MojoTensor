@@ -5,8 +5,11 @@ from layout.int_tuple import UNKNOWN_VALUE
 from gpu.host import DeviceContext, DeviceBuffer
 from random import rand
 
+from src.computational_graph import ComputationalGraph
 from src.kernels.layers import dense_forward, dense_backward
 from src.kernels.constants import MAX_GRID_SIZE
+from src.layers.layer import Layer
+from src.layers.constants import LayerFuncTypeConstants
 
 struct Dense[dtype: DType]:
     comptime TPB = 16
@@ -37,8 +40,10 @@ struct Dense[dtype: DType]:
         Self.GRAD_OUTPUT_LAYOUT
     ]
 
+    var computational_graph: UnsafePointer[ComputationalGraph[Self.dtype], MutAnyOrigin]
     var input_neurons: Int
     var output_neurons: Int
+    var training: Bool
     var forward_memory_allocated: Bool
     var backward_memory_allocated: Bool
     var cpu_ctx: DeviceContext
@@ -63,9 +68,11 @@ struct Dense[dtype: DType]:
     var backward_grid_dim: Optional[Tuple[Int, Int, Int]]
     var backward_block_dim: Optional[Tuple[Int, Int, Int]]
 
-    fn __init__(out self, input_neurons: Int, output_neurons: Int) raises:
+    fn __init__(out self, computational_graph: UnsafePointer[ComputationalGraph[Self.dtype], MutAnyOrigin], input_neurons: Int, output_neurons: Int) raises:
+        self.computational_graph = computational_graph
         self.input_neurons = input_neurons
         self.output_neurons = output_neurons
+        self.training = False
         self.forward_memory_allocated = False
         self.backward_memory_allocated = False
         self.cpu_ctx = DeviceContext(api='cpu')
@@ -94,13 +101,16 @@ struct Dense[dtype: DType]:
         self.backward_grid_dim = None
         self.backward_block_dim = None
 
-    fn allocate_kernel_memory(mut self, ctx: DeviceContext, batch_size: Int, trainable: Bool) raises -> None:
+    fn set_training(mut self, training: Bool) -> None:
+        self.training = training
+
+    fn allocate_kernel_memory(mut self, ctx: DeviceContext, batch_size: Int) raises -> None:
         self.forward_memory_allocated = False
         self.backward_memory_allocated = False
 
         self._allocate_common_kernel_memory(ctx, batch_size)
         self._allocate_forward_kernel_memory()
-        if trainable:
+        if self.training:
             self._allocate_backward_kernel_memory()
 
     fn _allocate_common_kernel_memory(mut self, ctx: DeviceContext, batch_size: Int) raises -> None:
@@ -198,12 +208,15 @@ struct Dense[dtype: DType]:
         self.backward_memory_allocated = True
 
     fn forward(
-        self,
-        x_tensor: LayoutTensor[Self.dtype, Self.X_LAYOUT, MutAnyOrigin]
+        mut self,
+        previous_layer: Optional[UnsafePointer[Layer[Self.dtype], MutAnyOrigin]],
+        x_tensor_raw: LayerFuncTypeConstants[Self.dtype].LayerInputType
     ) raises -> Tuple[
         LayoutTensor[Self.dtype, Self.OUTPUT_LAYOUT, MutAnyOrigin],
         DeviceBuffer[Self.dtype]
     ]:
+        x_tensor = x_tensor_raw[LayoutTensor[Self.dtype, Self.X_LAYOUT, MutAnyOrigin]]
+
         if not self.forward_memory_allocated:
             raise Error('Kernel memory must be allocated before calling the forward method')
 
@@ -218,20 +231,26 @@ struct Dense[dtype: DType]:
             grid_dim=self.forward_grid_dim.value(),
             block_dim=self.forward_block_dim.value()
         )
+
+        if self.training:
+            self.computational_graph[].add_backward_operation_inputs(UnsafePointer(to=self), previous_layer, x_tensor.copy())
+
         return self.output_tensor.value(), self.output.value()
 
     fn backward(
-        self,
-        x_tensor: LayoutTensor[Self.dtype, Self.X_LAYOUT, MutAnyOrigin],
-        grad_output_tensor: LayoutTensor[Self.dtype, Self.GRAD_OUTPUT_LAYOUT, MutAnyOrigin]
+        mut self,
+        previous_layer: Optional[UnsafePointer[Layer[Self.dtype], MutAnyOrigin]],
+        x_tensor_raw: LayerFuncTypeConstants[Self.dtype].LayerInputType,
+        grad_output_tensor_raw: LayerFuncTypeConstants[Self.dtype].LayerGradOutputType
     ) raises -> Tuple[
-        LayoutTensor[Self.dtype, Self.X_GRAD_LAYOUT, MutAnyOrigin],
-        DeviceBuffer[Self.dtype],
-        LayoutTensor[Self.dtype, Self.W_GRAD_LAYOUT, MutAnyOrigin],
-        DeviceBuffer[Self.dtype],
-        LayoutTensor[Self.dtype, Self.B_GRAD_LAYOUT, MutAnyOrigin],
-        DeviceBuffer[Self.dtype]
+        Tuple[LayoutTensor[Self.dtype, Self.X_GRAD_LAYOUT, MutAnyOrigin], DeviceBuffer[Self.dtype]],
+        List[DeviceBuffer[Self.dtype]]
     ]:
+        x_tensor = x_tensor_raw[LayoutTensor[Self.dtype, Self.X_LAYOUT, MutAnyOrigin]]
+        grad_output_tensor = grad_output_tensor_raw[LayoutTensor[Self.dtype, Self.GRAD_OUTPUT_LAYOUT, MutAnyOrigin]]
+
+        if not self.training:
+            raise Error('Cannot backward if training is disabled')
         if not self.backward_memory_allocated:
             raise Error('Kernel memory must be allocated before calling the backward method')
 
@@ -248,4 +267,8 @@ struct Dense[dtype: DType]:
             grid_dim=self.backward_grid_dim.value(),
             block_dim=self.backward_block_dim.value()
         )
-        return self.x_gradient_tensor.value(), self.x_gradient.value(), self.w_gradient_tensor.value(), self.w_gradient.value(), self.b_gradient_tensor.value(), self.b_gradient.value()
+
+        return (
+            (self.x_gradient_tensor.value(), self.x_gradient.value()),
+            [self.w_gradient.value(), self.b_gradient.value()]
+        )
