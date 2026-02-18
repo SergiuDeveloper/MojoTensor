@@ -38,7 +38,6 @@ fn mse_forward[
         diff = pred - target
         output[batch_idx, global_row, global_col] = diff * diff
 
-
 fn mse_backward[
     tpb: Int,
     dtype: DType,

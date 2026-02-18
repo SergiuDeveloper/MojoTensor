@@ -61,7 +61,6 @@ fn dense_forward[
     if global_row < output_dim and global_col < batch_size:
         output[global_col, global_row] = acc + rebind[Scalar[dtype]](b[global_row])
 
-
 fn dense_backward[
     tpb: Int,
     dtype: DType,

@@ -7,13 +7,13 @@ from src.layers import Layer, LayerFuncTypeConstants
 from src.optimizers import Optimizer
 
 struct ComputationalGraph[dtype: DType](ImplicitlyCopyable):
-    var optimizer: UnsafePointer[Optimizer[Self.dtype], MutAnyOrigin]
+    var optimizer: Optional[UnsafePointer[Optimizer[Self.dtype], MutAnyOrigin]]
     var backward_operation_inputs: List[Tuple[UnsafePointer[Layer[Self.dtype], MutAnyOrigin], Optional[UnsafePointer[Layer[Self.dtype], MutAnyOrigin]], LayerFuncTypeConstants[Self.dtype].LayerInputType]]
     var backward_operation_grad_outputs: Dict[String, List[LayerFuncTypeConstants[Self.dtype].LayerGradOutputType]]
     var gradients: Dict[String, List[List[Float64]]]
     var layer_keys: Dict[String, UnsafePointer[Layer[Self.dtype], MutAnyOrigin]]
 
-    fn __init__(out self, optimizer: UnsafePointer[Optimizer[Self.dtype], MutAnyOrigin]):
+    fn __init__(out self, optimizer: Optional[UnsafePointer[Optimizer[Self.dtype], MutAnyOrigin]]):
         self.optimizer = optimizer
         self.backward_operation_inputs = []
         self.backward_operation_grad_outputs = {}
@@ -58,16 +58,22 @@ struct ComputationalGraph[dtype: DType](ImplicitlyCopyable):
         current_layer: UnsafePointer[Layer[Self.dtype], MutAnyOrigin],
         previous_layer: Optional[UnsafePointer[Layer[Self.dtype], MutAnyOrigin]],
         input_tensor: LayerFuncTypeConstants[Self.dtype].LayerInputType
-    ) -> None:
+    ) raises -> None:
+        if self.optimizer is None:
+            raise Error('Cannot add backward operation inputs if no optimizer is set on the computational graph')
         self.backward_operation_inputs.append(Tuple(current_layer, previous_layer, input_tensor))
 
-    fn add_backward_operation_grad_outputs(
+    fn _add_backward_operation_grad_outputs(
         mut self,
         previous_layer: Optional[UnsafePointer[Layer[Self.dtype], MutAnyOrigin]],
         grad_output_tensor: LayerFuncTypeConstants[Self.dtype].LayerGradOutputType
     ) raises -> None:
+        if self.optimizer is None:
+            raise Error('Cannot add backward operation grad outputs if no optimizer is set on the computational graph')
+
         if previous_layer is None:
             return
+
         layer_key = self._compute_layer_key(previous_layer.value())
         if layer_key not in self.backward_operation_grad_outputs:
             self.backward_operation_grad_outputs[layer_key] = [grad_output_tensor]
@@ -75,6 +81,9 @@ struct ComputationalGraph[dtype: DType](ImplicitlyCopyable):
             self.backward_operation_grad_outputs[layer_key].append(grad_output_tensor)
 
     fn backward(mut self, grad_output: LayerFuncTypeConstants[Self.dtype].LayerGradOutputType) raises -> None:
+        if self.optimizer is None:
+            raise Error('Cannot run backward if no optimizer is set on the computational graph')
+
         first_iteration = True
         while len(self.backward_operation_inputs) > 0:
             backward_operation_input = self.backward_operation_inputs.pop()
@@ -118,12 +127,15 @@ struct ComputationalGraph[dtype: DType](ImplicitlyCopyable):
                         for j in range(simd_end, num_elements):
                             self.gradients[current_layer_key][i][j] += param_grad_host[j].cast[DType.float64]()
 
-            self.add_backward_operation_grad_outputs(previous_layer, x_gradient_data[0].copy())
+            self._add_backward_operation_grad_outputs(previous_layer, x_gradient_data[0].copy())
 
     fn update_weights(mut self) raises -> None:
+        if self.optimizer is None:
+            raise Error('Cannot update weights if no optimizer is set on the computational graph')
+
         for gradient_item in self.gradients.items():
             layer = self.layer_keys[gradient_item.key]
-            self.optimizer[].update_weights(layer, gradient_item.value)
+            self.optimizer.value()[].update_weights(layer, gradient_item.value)
         self.gradients = {}
         self.layer_keys = {}
 

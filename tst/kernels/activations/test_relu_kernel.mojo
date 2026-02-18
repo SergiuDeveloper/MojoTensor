@@ -83,7 +83,6 @@ fn test_relu_forward() raises:
                         idx = batch * SIZE1 * SIZE2 + row * SIZE2 + col
                         assert_almost_equal(output_host[idx], expected[idx], rtol=1e-10)
 
-
 fn test_relu_backward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64

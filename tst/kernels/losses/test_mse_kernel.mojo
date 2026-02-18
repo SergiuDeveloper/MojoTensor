@@ -96,7 +96,6 @@ fn test_mse_forward() raises:
                         idx = batch * SIZE1 * SIZE2 + row * SIZE2 + col
                         assert_almost_equal(output_host[idx], expected[idx], rtol=1e-10)
 
-
 fn test_mse_backward() raises:
     comptime TPB = 16
     comptime DTYPE = DType.float64
@@ -194,7 +193,6 @@ fn test_mse_backward() raises:
                     for col in range(SIZE2):
                         idx = batch * SIZE1 * SIZE2 + row * SIZE2 + col
                         assert_almost_equal(output_input_gradient_host[idx], expected[idx], rtol=1e-10)
-
 
 fn main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
