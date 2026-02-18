@@ -6,7 +6,7 @@ from layout.int_tuple import UNKNOWN_VALUE
 from testing import TestSuite, assert_almost_equal
 
 from src.layers import Dense
-from src.optimizers import SGD
+from src.optimizers import Optimizer, SGD
 from src.computational_graph import ComputationalGraph
 
 fn test_sgd_update_weights() raises:
@@ -18,9 +18,9 @@ fn test_sgd_update_weights() raises:
 
     optimizer = SGD[DTYPE](LEARNING_RATE)
     optimizer_ptr = UnsafePointer(to=optimizer)
-    computational_graph = ComputationalGraph[DTYPE](optimizer_ptr)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
     computational_graph_ptr = UnsafePointer(to=computational_graph)
-    dense_layer = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, OUTPUT_NEURONS)
     dense_layer.set_training(True)
 
     expected_w = List[Float64]()

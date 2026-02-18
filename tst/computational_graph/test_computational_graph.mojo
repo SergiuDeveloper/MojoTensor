@@ -7,7 +7,7 @@ from random import random_float64
 from testing import TestSuite, assert_equal, assert_true, assert_almost_equal
 
 from src.layers import Dense, LayerFuncTypeConstants
-from src.optimizers import SGD
+from src.optimizers import Optimizer, SGD
 from src.computational_graph import ComputationalGraph
 
 fn test_computational_graph_backward() raises:
@@ -22,10 +22,10 @@ fn test_computational_graph_backward() raises:
 
     optimizer = SGD[DTYPE](LEARNING_RATE)
     optimizer_ptr = UnsafePointer(to=optimizer)
-    computational_graph = ComputationalGraph[DTYPE](optimizer_ptr)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
     computational_graph_ptr = UnsafePointer(to=computational_graph)
-    layer1 = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, HIDDEN_NEURONS)
-    layer2 = Dense[DTYPE](computational_graph_ptr, HIDDEN_NEURONS, OUTPUT_NEURONS)
+    layer1 = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, HIDDEN_NEURONS)
+    layer2 = Dense[DTYPE](computational_graph_ptr, 'dense2', HIDDEN_NEURONS, OUTPUT_NEURONS)
     layer1.set_training(True)
     layer2.set_training(True)
 
@@ -161,9 +161,9 @@ fn test_computational_graph_copy() raises:
 
     optimizer = SGD[DTYPE](LEARNING_RATE)
     optimizer_ptr = UnsafePointer(to=optimizer)
-    original_graph = ComputationalGraph[DTYPE](optimizer_ptr)
+    original_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
     computational_graph_ptr = UnsafePointer(to=original_graph)
-    layer1 = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
+    layer1 = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, OUTPUT_NEURONS)
     layer1.set_training(True)
 
     with DeviceContext() as ctx:
@@ -251,7 +251,7 @@ fn test_computational_graph_copy() raises:
             for i in range(OUTPUT_NEURONS):
                 assert_almost_equal(original_grads[1][i], expected_b_host[i].cast[DType.float64](), rtol=1e-10)
 
-        assert_equal(copied_graph.optimizer, original_graph.optimizer)
+        assert_equal(copied_graph.optimizer.value(), original_graph.optimizer.value())
 
 fn test_computational_graph_update_weights() raises:
     comptime BATCH_SIZE = 2
@@ -262,9 +262,9 @@ fn test_computational_graph_update_weights() raises:
 
     optimizer = SGD[DTYPE](LEARNING_RATE)
     optimizer_ptr = UnsafePointer(to=optimizer)
-    computational_graph = ComputationalGraph[DTYPE](optimizer_ptr)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
     computational_graph_ptr = UnsafePointer(to=computational_graph)
-    dense_layer = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, OUTPUT_NEURONS)
     dense_layer.set_training(True)
 
     expected_w = List[Float64]()

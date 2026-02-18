@@ -5,14 +5,16 @@ from layout.int_tuple import UNKNOWN_VALUE
 from gpu.host import DeviceContext, DeviceBuffer
 from sys import simd_width_of
 from random import rand
+from python import Python, PythonObject
 
 from src.computational_graph import ComputationalGraph
 from src.kernels.layers import dense_forward, dense_backward
 from src.kernels.constants import MAX_GRID_SIZE
-from src.layers.layer import Layer
-from src.layers.constants import LayerFuncTypeConstants
+from .layer import Layer, LayerType
+from .constants import LayerFuncTypeConstants
 
-struct Dense[dtype: DType]:
+struct Dense[dtype: DType](ImplicitlyCopyable):
+    comptime LAYER_TYPE = LayerType.DENSE
     comptime TPB = 16
     comptime OUTPUT_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
     comptime X_LAYOUT = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
@@ -42,6 +44,7 @@ struct Dense[dtype: DType]:
     ]
 
     var computational_graph: UnsafePointer[ComputationalGraph[Self.dtype], MutAnyOrigin]
+    var name: String
     var input_neurons: Int
     var output_neurons: Int
     var training: Bool
@@ -69,8 +72,9 @@ struct Dense[dtype: DType]:
     var backward_grid_dim: Optional[Tuple[Int, Int, Int]]
     var backward_block_dim: Optional[Tuple[Int, Int, Int]]
 
-    fn __init__(out self, computational_graph: UnsafePointer[ComputationalGraph[Self.dtype], MutAnyOrigin], input_neurons: Int, output_neurons: Int) raises:
+    fn __init__(out self, computational_graph: UnsafePointer[ComputationalGraph[Self.dtype], MutAnyOrigin], name: String, input_neurons: Int, output_neurons: Int) raises:
         self.computational_graph = computational_graph
+        self.name = name
         self.input_neurons = input_neurons
         self.output_neurons = output_neurons
         self.training = False
@@ -102,7 +106,50 @@ struct Dense[dtype: DType]:
         self.backward_grid_dim = None
         self.backward_block_dim = None
 
-    fn set_training(mut self, training: Bool) -> None:
+    fn serialize(self) raises -> PythonObject:
+        w_list = Python.evaluate('[]')
+        with self.w_cpu.map_to_host() as w_host:
+            for i in range(self.output_neurons):
+                row = Python.evaluate('[]')
+                for j in range(self.input_neurons):
+                    row.append(w_host[i * self.input_neurons + j].cast[DType.float64]())
+                w_list.append(row)
+        b_list = Python.evaluate('[]')
+        with self.b_cpu.map_to_host() as b_host:
+            for i in range(self.output_neurons):
+                b_list.append(b_host[i].cast[DType.float64]())
+        
+        data = Python.evaluate('{}')
+        data['metadata'] = Python.evaluate('{}')
+        data['metadata']['input_neurons'] = self.input_neurons
+        data['metadata']['output_neurons'] = self.output_neurons
+        data['weights'] = Python.evaluate('{}')
+        data['weights']['w'] = w_list
+        data['weights']['b'] = b_list    
+        return data
+
+    @staticmethod
+    fn deserialize(computational_graph: UnsafePointer[ComputationalGraph[Self.dtype], MutAnyOrigin], data: PythonObject) raises -> Self:
+        name = String(data['name'])
+        input_neurons = Int(String(data['data']['metadata']['input_neurons']))
+        output_neurons = Int(String(data['data']['metadata']['output_neurons']))
+        
+        dense = Dense[Self.dtype](computational_graph, name, input_neurons, output_neurons)
+        dense.set_weights(data['data']['weights'])
+        return dense
+
+    fn set_weights(mut self, weights: PythonObject) raises -> None:
+        with self.w_cpu.map_to_host() as w_host:
+            for i in range(self.output_neurons):
+                for j in range(self.input_neurons):
+                    w_host[i * self.input_neurons + j] = Float64(String(weights['w'][i][j])).cast[Self.dtype]()
+        with self.b_cpu.map_to_host() as b_host:
+            for i in range(self.output_neurons):
+                b_host[i] = Float64(String(weights['b'][i])).cast[Self.dtype]()
+
+    fn set_training(mut self, training: Bool) raises -> None:
+        if training and self.computational_graph[].optimizer is None:
+            raise Error('Cannot enable training if no optimizer is set on the computational graph')
         self.training = training
 
     fn allocate_kernel_memory(mut self, ctx: DeviceContext, batch_size: Int) raises -> None:

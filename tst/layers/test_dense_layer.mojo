@@ -4,10 +4,11 @@ from layout.runtime_layout import RuntimeLayout
 from layout.runtime_tuple import RuntimeTuple
 from layout.int_tuple import UNKNOWN_VALUE
 from random import random_float64
-from testing import TestSuite, assert_almost_equal
+from testing import TestSuite, assert_almost_equal, assert_true
+from python import Python
 
 from src.layers import Dense
-from src.optimizers import SGD
+from src.optimizers import Optimizer, SGD
 from src.computational_graph import ComputationalGraph
 
 fn test_dense_forward() raises:
@@ -20,9 +21,9 @@ fn test_dense_forward() raises:
 
     optimizer = SGD[DTYPE](LEARNING_RATE)
     optimizer_ptr = UnsafePointer(to=optimizer)
-    computational_graph = ComputationalGraph[DTYPE](optimizer_ptr)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
     computational_graph_ptr = UnsafePointer(to=computational_graph)
-    dense_layer = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, OUTPUT_NEURONS)
 
     with DeviceContext() as ctx:
         x = ctx.enqueue_create_buffer[DTYPE](BATCH_SIZE * INPUT_NEURONS)
@@ -75,9 +76,9 @@ fn test_dense_backward() raises:
 
     optimizer = SGD[DTYPE](LEARNING_RATE)
     optimizer_ptr = UnsafePointer(to=optimizer)
-    computational_graph = ComputationalGraph[DTYPE](optimizer_ptr)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
     computational_graph_ptr = UnsafePointer(to=computational_graph)
-    dense_layer = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, OUTPUT_NEURONS)
     dense_layer.set_training(True)
 
     with DeviceContext() as ctx:
@@ -171,9 +172,9 @@ fn test_dense_update_weights() raises:
 
     optimizer = SGD[DTYPE](LEARNING_RATE)
     optimizer_ptr = UnsafePointer(to=optimizer)
-    computational_graph = ComputationalGraph[DTYPE](optimizer_ptr)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
     computational_graph_ptr = UnsafePointer(to=computational_graph)
-    dense_layer = Dense[DTYPE](computational_graph_ptr, INPUT_NEURONS, OUTPUT_NEURONS)
+    dense_layer = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, OUTPUT_NEURONS)
     dense_layer.set_training(True)
 
     expected_w = List[Float64]()
@@ -234,6 +235,108 @@ fn test_dense_update_weights() raises:
         ctx.synchronize()
         for i in range(OUTPUT_NEURONS):
             assert_almost_equal(b_tensor_buf[i].cast[DType.float64](), expected_b[i], rtol=1e-10)
+
+fn test_dense_serialize() raises:
+    json = Python.import_module('json')
+
+    comptime DTYPE = DType.float64
+    comptime INPUT_NEURONS = 4
+    comptime OUTPUT_NEURONS = 3
+
+    optimizer = SGD[DTYPE](0.1)
+    optimizer_ptr = UnsafePointer(to=optimizer)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
+    computational_graph_ptr = UnsafePointer(to=computational_graph)
+
+    dense = Dense[DTYPE](computational_graph_ptr, 'dense1', INPUT_NEURONS, OUTPUT_NEURONS)
+    serialized = json.loads(json.dumps(dense.serialize()))
+
+    assert_true(serialized['metadata']['input_neurons'] == dense.input_neurons)
+    assert_true(serialized['metadata']['output_neurons'] == dense.output_neurons)
+
+    w_ptr = dense.w_cpu.unsafe_ptr()
+    for i in range(OUTPUT_NEURONS):
+        for j in range(INPUT_NEURONS):
+            assert_true(serialized['weights']['w'][i][j] == w_ptr[i * INPUT_NEURONS + j].cast[DType.float64]())
+
+    b_ptr = dense.b_cpu.unsafe_ptr()
+    for i in range(OUTPUT_NEURONS):
+        assert_true(serialized['weights']['b'][i] == b_ptr[i].cast[DType.float64]())
+
+fn test_dense_deserialize() raises:
+    comptime DTYPE = DType.float64
+    comptime INPUT_NEURONS = 4
+    comptime OUTPUT_NEURONS = 3
+
+    optimizer = SGD[DTYPE](0.1)
+    optimizer_ptr = UnsafePointer(to=optimizer)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
+    computational_graph_ptr = UnsafePointer(to=computational_graph)
+
+    original = Dense[DTYPE](computational_graph_ptr, 'test_dense', INPUT_NEURONS, OUTPUT_NEURONS)
+
+    entry = Python.evaluate('{}')
+    entry['name'] = original.name
+    entry['data'] = original.serialize()
+
+    deserialized = Dense[DTYPE].deserialize(computational_graph_ptr, entry)
+
+    assert_true(deserialized.name == original.name)
+    assert_true(deserialized.LAYER_TYPE.value == original.LAYER_TYPE.value)
+    assert_true(deserialized.input_neurons == original.input_neurons)
+    assert_true(deserialized.output_neurons == original.output_neurons)
+
+    orig_w_ptr = original.w_cpu.unsafe_ptr()
+    deser_w_ptr = deserialized.w_cpu.unsafe_ptr()
+    for i in range(OUTPUT_NEURONS):
+        for j in range(INPUT_NEURONS):
+            assert_almost_equal(
+                deser_w_ptr[i * INPUT_NEURONS + j].cast[DType.float64](),
+                orig_w_ptr[i * INPUT_NEURONS + j].cast[DType.float64](),
+                rtol=1e-10
+            )
+
+    orig_b_ptr = original.b_cpu.unsafe_ptr()
+    deser_b_ptr = deserialized.b_cpu.unsafe_ptr()
+    for i in range(OUTPUT_NEURONS):
+        assert_almost_equal(
+            deser_b_ptr[i].cast[DType.float64](),
+            orig_b_ptr[i].cast[DType.float64](),
+            rtol=1e-10
+        )
+
+fn test_dense_set_weights() raises:
+    comptime DTYPE = DType.float64
+    comptime INPUT_NEURONS = 4
+    comptime OUTPUT_NEURONS = 3
+
+    optimizer = SGD[DTYPE](0.1)
+    optimizer_ptr = UnsafePointer(to=optimizer)
+    computational_graph = ComputationalGraph[DTYPE](UnsafePointer[Optimizer[DTYPE], MutAnyOrigin](optimizer_ptr))
+    computational_graph_ptr = UnsafePointer(to=computational_graph)
+
+    original = Dense[DTYPE](computational_graph_ptr, 'test_dense', INPUT_NEURONS, OUTPUT_NEURONS)
+    target = Dense[DTYPE](computational_graph_ptr, 'other_dense', INPUT_NEURONS, OUTPUT_NEURONS)
+    target.set_weights(original.serialize()['weights'])
+
+    orig_w_ptr = original.w_cpu.unsafe_ptr()
+    target_w_ptr = target.w_cpu.unsafe_ptr()
+    for i in range(OUTPUT_NEURONS):
+        for j in range(INPUT_NEURONS):
+            assert_almost_equal(
+                target_w_ptr[i * INPUT_NEURONS + j].cast[DType.float64](),
+                orig_w_ptr[i * INPUT_NEURONS + j].cast[DType.float64](),
+                rtol=1e-10
+            )
+
+    orig_b_ptr = original.b_cpu.unsafe_ptr()
+    target_b_ptr = target.b_cpu.unsafe_ptr()
+    for i in range(OUTPUT_NEURONS):
+        assert_almost_equal(
+            target_b_ptr[i].cast[DType.float64](),
+            orig_b_ptr[i].cast[DType.float64](),
+            rtol=1e-10
+        )
 
 fn main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
