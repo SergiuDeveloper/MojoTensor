@@ -1,4 +1,8 @@
+*.zip
+*.csv
+
+.claude/
+
 # pixi environments
 .pixi/*
 !.pixi/config.toml
-.claude/
